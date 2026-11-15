@@ -32,6 +32,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <string>
 
 namespace microStore { namespace Adapters {
 
@@ -198,7 +199,7 @@ protected:
 	class FileSystemImpl : public microStore::FileSystemImpl {
 
 	public:
-		FileSystemImpl(const char* basepath = "") : _basepath(basepath) {}
+		FileSystemImpl(const char* basepath = "") : _basepath(basepath ? basepath : "") {}
 	    virtual ~FileSystemImpl() {}
 
 	public:
@@ -220,7 +221,7 @@ protected:
 			USTORE_LOG("[ustore] Initializing PosixFileSystem\n");
 #if defined(ESP32)
 			// Initialize LittleFS for POSIX file access
-			if (!LittleFS.begin(true, _basepath)) {
+			if (!LittleFS.begin(true, _basepath.c_str())) {
 				USTORE_LOG("[ustore] Failed to initialize PosixFileSystem!\n");
 				return false;
 			}
@@ -247,7 +248,9 @@ protected:
 			return true;
 		}
 
-		virtual microStore::File open(const char* path, microStore::File::Mode mode, const bool create = false) override {
+		virtual microStore::File open(const char* path_in, microStore::File::Mode mode, const bool create = false) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			int flags;
 			switch (mode) {
 				// Read only. File must exist. ("r")
@@ -283,7 +286,9 @@ protected:
 		}
 
 
-		inline virtual bool exists(const char* path) override {
+		inline virtual bool exists(const char* path_in) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			int fd = ::open(path, O_RDONLY);
 			if (fd != -1) {
 				::close(fd);
@@ -292,15 +297,19 @@ protected:
 			return false;
 		}
 
-		inline virtual bool remove(const char* path) override {
+		inline virtual bool remove(const char* path_in) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			return (::unlink(path) == 0);
 		}
 
 		inline virtual bool rename(const char* from_path, const char* to_path) override {
-			return (::rename(from_path, to_path) == 0);
+			return (::rename(resolve(from_path).c_str(), resolve(to_path).c_str()) == 0);
 		}
 
-		inline virtual bool mkdir(const char* path) override {
+		inline virtual bool mkdir(const char* path_in) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			struct stat st = {0};
 			if (::stat(path, &st) == 0) {
 				if (S_ISDIR(st.st_mode)) {
@@ -315,11 +324,13 @@ protected:
 		}
 
 		inline virtual bool rmdir(const char* path) override {
-			return (::rmdir(path) == 0);
+			return (::rmdir(resolve(path).c_str()) == 0);
 		}
 
 
-		inline virtual size_t size(const char* path) override {
+		inline virtual size_t size(const char* path_in) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			struct stat st;
 			if (stat(path, &st) != 0) {
 				return 0;
@@ -327,12 +338,16 @@ protected:
 			return st.st_size;
 		}
 
-		inline virtual bool isDirectory(const char* path) override {
+		inline virtual bool isDirectory(const char* path_in) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			struct stat st = {0};
 			return (::stat(path, &st) == 0 && S_ISDIR(st.st_mode));
 		}
 
-		virtual std::list<std::string> listDirectory(const char* path, Callbacks::DirectoryListing callback = nullptr) override {
+		virtual std::list<std::string> listDirectory(const char* path_in, Callbacks::DirectoryListing callback = nullptr) override {
+			const std::string full = resolve(path_in);
+			const char* path = full.c_str();
 			std::list<std::string> files;
 			DIR *dir = ::opendir(path);
 			if (dir == NULL) {
@@ -369,7 +384,16 @@ protected:
 		}
 
 	private:
-		const char* _basepath = "";
+		std::string resolve(const char* path) const {
+			if (path == nullptr || _basepath.empty() || path[0] == '/') {
+				return path ? path : "";
+			}
+			if (path[0] == '.' && path[1] == '/') {
+				path += 2;
+			}
+			return _basepath + "/" + path;
+		}
+		std::string _basepath;
 	};
 
 };
